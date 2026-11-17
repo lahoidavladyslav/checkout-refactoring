@@ -12,3 +12,4 @@ orders.log
 .DS_Store
 .idea/
 .vscode/
+mutants/

@@ -48,6 +48,36 @@ class TestConstruction:
             money.kopiyky = 5  # type: ignore[misc]  # frozen dataclass, that is the point
 
 
+class TestErrorMessages:
+    """The messages are for humans, but they are what makes a rejected amount diagnosable."""
+
+    def test_negative_amount(self) -> None:
+        with pytest.raises(
+            InvalidMoneyError, match=r"^amount must not be negative, got -5 kopiyky$"
+        ):
+            Money(-5)
+
+    def test_non_integer_kopiyky(self) -> None:
+        with pytest.raises(InvalidMoneyError, match=r"^amount in kopiyky must be an int, got 1.5$"):
+            Money(1.5)  # type: ignore[arg-type]  # the invalid input is the point of the test
+
+    def test_unsupported_type(self) -> None:
+        with pytest.raises(InvalidMoneyError, match=r"^cannot build money from float$"):
+            Money.from_uah(1.5)  # type: ignore[arg-type]  # floats are rejected on purpose
+
+    def test_not_a_number(self) -> None:
+        with pytest.raises(InvalidMoneyError, match=r"^not a number: 'abc'$"):
+            Money.from_uah("abc")
+
+    def test_not_finite(self) -> None:
+        with pytest.raises(InvalidMoneyError, match=r"^not a finite number: 'Infinity'$"):
+            Money.from_uah("Infinity")
+
+    def test_fraction_of_a_kopiyk(self) -> None:
+        with pytest.raises(InvalidMoneyError, match=r"^'99.999' has a fraction of a kopiyk$"):
+            Money.from_uah("99.999")
+
+
 class TestArithmetic:
     def test_addition_is_exact(self) -> None:
         """The classic float trap: 0.1 + 0.2."""
@@ -130,6 +160,16 @@ class TestRounding:
 
         assert stepwise == Money.from_uah("0.48")
         assert at_once == Money.from_uah("0.47")
+
+
+class TestZero:
+    def test_zero_is_zero(self) -> None:
+        assert Money.ZERO.is_zero()
+        assert Money(0).is_zero()
+
+    def test_any_other_amount_is_not(self) -> None:
+        assert not Money(1).is_zero()
+        assert not Money.from_uah("100").is_zero()
 
 
 class TestComparison:

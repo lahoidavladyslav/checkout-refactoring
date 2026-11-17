@@ -94,6 +94,41 @@ class TestTransitions:
             order.ship()
 
 
+class TestPlacing:
+    def test_a_placed_order_carries_what_it_was_given_and_starts_new(self) -> None:
+        lines = (line("100", 2), line("30"))
+
+        order = Order.place(
+            id=3,
+            email=EmailAddress("buyer@example.com"),
+            lines=lines,
+            total=Money.from_uah("245"),
+            customer_type=CustomerType.VIP,
+            created_at=NOW,
+        )
+
+        assert order.id == 3
+        assert str(order.email) == "buyer@example.com"
+        assert order.lines == lines
+        assert order.total == Money.from_uah("245")
+        assert order.customer_type is CustomerType.VIP
+        assert order.created_at == NOW
+        assert order.status is NEW
+
+    def test_pending_events_can_be_read_without_consuming_them(self) -> None:
+        order = Order.place(
+            id=1,
+            email=EmailAddress("buyer@example.com"),
+            lines=(line(),),
+            total=Money.from_uah("100"),
+            customer_type=CustomerType.REGULAR,
+            created_at=NOW,
+        )
+
+        assert order.pending_events == tuple(order.pull_events())
+        assert order.pending_events == ()
+
+
 class TestEvents:
     def test_placing_records_order_placed(self) -> None:
         order = Order.place(
@@ -155,7 +190,7 @@ class TestEvents:
 
 
 def test_created_at_must_be_timezone_aware() -> None:
-    with pytest.raises(ValueError, match="timezone-aware"):
+    with pytest.raises(ValueError, match=r"^created_at must be timezone-aware$"):
         Order(
             id=1,
             email=EmailAddress("buyer@example.com"),

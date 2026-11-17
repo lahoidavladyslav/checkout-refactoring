@@ -101,6 +101,18 @@ class TestPricingOrder:
         assert result.total == uah("134.99")
 
 
+class TestCityReachesTheShippingMethod:
+    @pytest.mark.parametrize(
+        ("city", "shipping"), [("Kyiv", "120"), ("Lviv", "170"), (None, "170")]
+    )
+    def test_courier_price_depends_on_the_city(
+        self, calculator: PricingCalculator, city: str | None, shipping: str
+    ) -> None:
+        result = quote(calculator, "100", delivery="courier", city=city)
+
+        assert result.shipping == uah(shipping)
+
+
 class TestOpenForExtension:
     """New rules plug in through the registries; the calculator is not touched."""
 
