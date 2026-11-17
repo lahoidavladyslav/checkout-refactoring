@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Request
 
 from shop.api.errors import install_error_handlers
+from shop.api.middleware import CorrelationIdMiddleware
 from shop.api.schemas import CheckoutIn, ErrorOut, OrderOut, StatusChangeIn
 from shop.application.checkout import CheckoutService
 from shop.application.orders import OrderService
@@ -52,6 +53,7 @@ def create_app(
     app.state.checkout = checkout
     app.state.orders = orders
     install_error_handlers(app)
+    app.add_middleware(CorrelationIdMiddleware)
 
     # The handlers are plain `def`: the services are blocking, so FastAPI runs them in its
     # thread pool instead of stalling the event loop.
