@@ -35,6 +35,10 @@ packages = ["src/shop"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
+filterwarnings = [
+    # Starlette's TestClient still drives httpx; the replacement client is not needed here.
+    "ignore:Using .httpx. with .starlette.testclient.:Warning",
+]
 markers = [
     "characterization: pins the observable behaviour of the legacy checkout",
 ]

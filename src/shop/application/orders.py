@@ -14,10 +14,14 @@ class OrderService:
         self._events = events
         self._clock = clock
 
-    def change_status(self, order_id: int, target: OrderStatus) -> Order:
+    def get(self, order_id: int) -> Order:
         order = self._orders.get(order_id)
         if order is None:
             raise OrderNotFoundError(f"order {order_id} does not exist")
+        return order
+
+    def change_status(self, order_id: int, target: OrderStatus) -> Order:
+        order = self.get(order_id)
 
         match target:
             case OrderStatus.PAID:
