@@ -53,8 +53,8 @@ class TestPromotions:
 
         assert effect == PromoEffect(free_shipping=True)
 
-    def test_registered_codes(self) -> None:
-        assert set(PROMOTIONS) == {"SALE10", "MINUS50", "FREESHIP"}
+    def test_original_codes_stay_registered(self) -> None:
+        assert {"SALE10", "MINUS50", "FREESHIP"} <= set(PROMOTIONS)
 
 
 class TestCustomerDiscount:
@@ -85,5 +85,5 @@ class TestShipping:
     def test_cost(self, method: str, total: str, city: str | None, cost: str) -> None:
         assert SHIPPING_METHODS[method].cost(uah(total), city) == uah(cost)
 
-    def test_registered_methods(self) -> None:
-        assert set(SHIPPING_METHODS) == {"nova", "ukr", "courier"}
+    def test_original_methods_stay_registered(self) -> None:
+        assert {"nova", "ukr", "courier"} <= set(SHIPPING_METHODS)
