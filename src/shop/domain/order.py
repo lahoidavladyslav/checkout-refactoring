@@ -116,6 +116,11 @@ class Order:
     def can_move_to(self, target: OrderStatus) -> bool:
         return target in _TRANSITIONS[self._status]
 
+    @property
+    def pending_events(self) -> tuple[DomainEvent, ...]:
+        """The events recorded and not yet handed over. Reading them does not consume them."""
+        return tuple(self._events)
+
     def pull_events(self) -> list[DomainEvent]:
         """Return the recorded events and forget them."""
         events, self._events = self._events, []

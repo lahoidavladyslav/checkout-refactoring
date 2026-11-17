@@ -1,0 +1,24 @@
+# Local PostgreSQL for development:
+#   docker compose up -d db
+#   export SHOP_DATABASE_URL=postgresql+psycopg://shop:shop@localhost:5432/shop
+#   make migrate && make run        # API
+#   make worker                     # outbox worker, in another terminal
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

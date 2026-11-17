@@ -1,4 +1,4 @@
-.PHONY: install check lint format typecheck arch test run
+.PHONY: install check lint format typecheck arch test run worker migrate db-up
 
 install:
 	uv sync
@@ -24,3 +24,12 @@ test:
 
 run:
 	uv run uvicorn --factory shop.main:build_app --reload
+
+worker:
+	uv run python -m shop.worker
+
+migrate:
+	uv run alembic upgrade head
+
+db-up:
+	docker compose up -d --wait db
