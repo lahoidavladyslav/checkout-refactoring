@@ -1,8 +1,7 @@
-"""Characterization of the legacy implementation.
+"""Defects of the legacy implementation, pinned down as executable documentation.
 
-These tests pin down what ``legacy.checkout`` does today, including behaviour that is
-plainly a defect. They are the safety net for the refactoring: the same table of cases is
-replayed against the new implementation in ``test_golden_master.py``.
+``test_golden_master.py`` replays the case table against both implementations. The tests here
+cover what that table cannot express: behaviour the refactoring deliberately changes.
 """
 
 from __future__ import annotations
@@ -13,41 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.characterization.cases import ALL_CASES, EMAIL, Case, request
+from tests.characterization.cases import EMAIL, request
 from tests.characterization.runners import LegacyRunner
 
 pytestmark = pytest.mark.characterization
-
-
-@pytest.mark.parametrize("case", ALL_CASES, ids=lambda case: case.id)
-def test_legacy_matches_the_case_table(case: Case, legacy_runner: LegacyRunner) -> None:
-    observed = legacy_runner.checkout(case.payload, gateway_status=case.gateway_status)
-
-    assert observed == case.expected
-
-
-def test_case_ids_are_unique() -> None:
-    ids = [case.id for case in ALL_CASES]
-
-    assert len(ids) == len(set(ids))
-
-
-def test_order_ids_are_sequential_and_failures_do_not_consume_them(
-    legacy_runner: LegacyRunner,
-) -> None:
-    first = legacy_runner.checkout(request(100))
-    rejected = legacy_runner.checkout(request((100, 0)))
-    second = legacy_runner.checkout(request(100))
-
-    assert (first.order_id, rejected.order_id, second.order_id) == (1, None, 2)
-
-
-def test_declined_payment_does_not_consume_an_order_id(legacy_runner: LegacyRunner) -> None:
-    legacy_runner.checkout(request(100, payment="card", card="tok"), gateway_status="declined")
-
-    second = legacy_runner.checkout(request(100))
-
-    assert second.order_id == 1
 
 
 class TestKnownDefects:
