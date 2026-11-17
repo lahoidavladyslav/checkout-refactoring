@@ -83,6 +83,20 @@ class TestPlacingAnOrder:
         assert response.json()["total"] == "270.00"
 
 
+class TestNewRules:
+    def test_buy3_and_pickup_end_to_end(self, client: TestClient) -> None:
+        body = checkout_body(
+            items=[{"price": "100", "qty": 2}, {"price": "30", "qty": 1}],
+            promo="BUY3",
+            delivery="pickup",
+        )
+
+        response = client.post("/checkout", json=body)
+
+        assert response.status_code == 201
+        assert response.json()["total"] == "200.00"
+
+
 class TestRejections:
     @pytest.mark.parametrize(
         ("overrides", "status", "code"),

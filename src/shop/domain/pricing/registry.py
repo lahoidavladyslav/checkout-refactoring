@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from shop.domain.customer import CustomerType
 from shop.domain.money import Money
+from shop.domain.pricing.cheapest_free import CheapestUnitFree
 from shop.domain.pricing.customer_discounts import CustomerDiscount, PercentageDiscount
 from shop.domain.pricing.promotions import FixedAmountOff, FreeShipping, PercentageOff, Promotion
 from shop.domain.pricing.shipping import (
@@ -23,6 +24,7 @@ PROMOTIONS: Mapping[str, Promotion] = {
     "SALE10": PercentageOff(Decimal(10)),
     "MINUS50": FixedAmountOff(amount=Money.from_uah(50), subtotal_above=Money.from_uah(500)),
     "FREESHIP": FreeShipping(),
+    "BUY3": CheapestUnitFree(min_units=3),
 }
 
 CUSTOMER_DISCOUNTS: Mapping[CustomerType, CustomerDiscount] = {
@@ -37,4 +39,5 @@ SHIPPING_METHODS: Mapping[str, ShippingMethod] = {
         local_price=Money.from_uah(120),
         remote_price=Money.from_uah(170),
     ),
+    "pickup": FlatRate(Money.ZERO),
 }
