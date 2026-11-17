@@ -6,7 +6,7 @@ Every finding has an ID so that tests, commits and `ARCHITECTURE.md` can refer t
 Severity: **High** (money, security or data loss), **Medium** (wrong or surprising
 behaviour, reliability), **Low** (maintainability).
 
-The "Resolution" column is filled in as the refactoring progresses; see
+The "Resolution" column records the outcome of the refactoring; see
 [`ARCHITECTURE.md`](../ARCHITECTURE.md#legacy-defects-fixed-and-kept) for the full rationale.
 
 ## 1. Correctness and money
@@ -30,7 +30,7 @@ The "Resolution" column is filled in as the refactoring progresses; see
 |----|------|---------|------------|
 | S1 | High | **Free shipping can be claimed by the client.** `data["free_ship"]` is read from the same dictionary the caller controls, so `{"free_ship": true}` waives shipping without any promo code. | Fixed by construction: the flag does not exist in the input schema, only a promotion can grant free shipping. |
 | S2 | High | **Input mutation.** `data["free_ship"] = True` modifies the caller's dictionary, a side effect on shared state and the mechanism behind S1. | Fixed: the input is immutable, pricing returns a new value. |
-| S3 | Medium | **PII in a plain-text log.** `orders.log` stores the customer's email and the full item list, unrotated, in the working directory. | Fixed: no file log; structured application logging contains the order id only. |
+| S3 | Medium | **PII in a plain-text log.** `orders.log` stores the customer's email and the full item list, unrotated, in the working directory. | Fixed: no file log; application logging refers to order ids only. |
 | S4 | Medium | **Card data is forwarded verbatim** from an untyped field and is one `print(data)` away from a log. | Fixed: the card is a `SecretStr` at the boundary, is never part of the order and never logged. |
 | S5 | Low | **Outbound requests have no `timeout`.** A hung provider blocks the worker forever (and the request-handling thread with it). | Fixed: all HTTP clients have explicit timeouts. |
 
