@@ -45,6 +45,13 @@ to refuse) and register it in `build_container`.
 **A notification.** Write a class with `notify(self, event: OrderPlaced) -> None` and subscribe it
 in `build_container`.
 
+**A new event type.** Add the dataclass to `domain/events.py`, teach `infrastructure/event_codec.py` to encode and
+decode it (the outbox stores it as JSON, so old rows must keep decoding), and register the subscribers in
+`_subscriptions` in `composition.py`.
+
+**A schema change.** Edit `infrastructure/sql/tables.py` and add an Alembic migration (`uv run alembic revision -m ...`).
+A test compares the migrated schema with the table definitions and fails if they differ.
+
 In every case: add tests next to the rule, and do not edit the existing strategies, `PricingCalculator`
 or `CheckoutService`. If you find you must, the design needs discussing first.
 

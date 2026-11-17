@@ -43,6 +43,12 @@ All settings come from environment variables and have defaults, see `shop/compos
 | `SHOP_SLACK_URL` | `https://slack.example.com/hook` | Slack webhook |
 | `SHOP_HTTP_TIMEOUT` | `5` | Timeout in seconds for email and Slack calls |
 | `SHOP_PAYMENT_TIMEOUT` | `10` | Timeout in seconds for payment calls |
+| `SHOP_PAYMENT_BREAKER_THRESHOLD` | `5` | Consecutive payment outages that open the circuit breaker |
+| `SHOP_PAYMENT_BREAKER_RESET` | `30` | Seconds before an open circuit lets one probe call through |
+| `SHOP_DATABASE_URL` | unset | `postgresql+psycopg://user:pass@host/db`. Unset: in-memory storage and in-process notifications |
+| `SHOP_OUTBOX_MAX_ATTEMPTS` | `6` | Delivery attempts before an outbox message is marked dead |
+| `SHOP_OUTBOX_BASE_DELAY` | `10` | Seconds before the first retry; doubles on every failure, capped at one hour |
+| `SHOP_OUTBOX_POLL` | `2` | Seconds the worker sleeps when the outbox is empty |
 
 The cash-on-delivery limit (5000) and the big-order alert threshold (10000) are fields of `Settings` and
 are wired in the composition root, not hard-coded in the services.
@@ -170,12 +176,54 @@ Prices are applied in this order, and every step rounds to a whole kopiyk (half 
 Order confirmation emails use the `vip_order` template for VIP customers and `order` for the rest.
 Orders above 10000 are also announced in Slack. A failing notification never fails the checkout.
 
+## Running with PostgreSQL
+
+By default orders live in memory. With `SHOP_DATABASE_URL` set, orders are stored in PostgreSQL and
+notifications go through a transactional outbox.
+
+```bash
+docker compose up -d --wait db          # or: make db-up
+export SHOP_DATABASE_URL=postgresql+psycopg://shop:shop@localhost:5432/shop
+make migrate                            # alembic upgrade head
+make run                                # the API
+make worker                             # the outbox worker, in a second terminal
+```
+
+The API writes the order and the events it owes in **one transaction**. The worker reads the outbox and
+sends the email and the Slack alert. If the mail service is down the message stays in the outbox and is
+retried with exponential backoff (10 s, 20 s, 40 s, ... up to one hour) until it succeeds or the maximum
+number of attempts is reached, after which it is marked `dead` and left for an operator.
+
+- Delivery is tracked **per subscriber**: if the email went out and Slack failed, only Slack is retried.
+- Several workers can run at once: messages are claimed with `FOR UPDATE SKIP LOCKED` and a lease, and a
+  crashed worker's messages become available again when its lease expires.
+- Delivery is **at least once**. If a worker dies between sending an email and recording it, the email is
+  sent again on the next attempt.
+
+Inspect the queue with SQL: `SELECT id, event_type, status, attempts, next_attempt_at, last_error FROM outbox;`
+
+## Reliability and observability
+
+- **Circuit breaker.** After five consecutive payment-provider outages the circuit opens and card checkouts
+  fail immediately with `502 payment_unavailable` instead of waiting for a timeout on every request. After
+  30 seconds one probe call decides whether to close it. Declines do not count as failures. It is a
+  decorator over the `PaymentGateway` port, per process, with no third-party library.
+- **Structured logs.** Every log record is a single JSON line with a `correlation_id`. Each request gets an
+  id (an incoming `X-Request-ID` is reused if it is short and made of safe characters, otherwise a new one
+  is generated), returned in the `X-Request-ID` response header and attached to every log line the request
+  produces, including those from notification handlers. Emails are masked (`b***@example.com`) in
+  messages, extra fields and tracebacks, and the access log omits the query string.
+
+```json
+{"timestamp": "2026-11-17T09:02:08.752+00:00", "level": "INFO", "logger": "shop.access", "message": "POST /checkout -> 201", "correlation_id": "6f1c0e9a...", "duration_ms": 12.4}
+```
+
 ## Development
 
 ```bash
 make check       # everything CI runs
 make format      # ruff fix + format
-make test        # pytest only
+make test        # pytest only (PostgreSQL tests start a throwaway local cluster, or use TEST_DATABASE_URL, or are skipped)
 ```
 
 CI (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`, `mypy --strict`,
@@ -193,6 +241,7 @@ are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 | Application | `tests/unit/application` | Use cases against hand-written fakes: rejections have no side effects, events, failure isolation. |
 | Infrastructure | `tests/unit/infrastructure` | Adapters over `httpx.MockTransport`: declines vs outages, timeouts, templates, thresholds. |
 | API | `tests/integration` | End-to-end through FastAPI with the real composition root and a fake HTTP transport. |
+| PostgreSQL | `tests/postgres` | Migrations vs table definitions, repository round trips, atomicity, outbox claiming under concurrency, relay retries end to end, the worker loop. Runs against a real PostgreSQL. |
 
 ## How behaviour is preserved
 
@@ -244,10 +293,14 @@ src/shop/
     orders.py        OrderService
     ports.py         PaymentGateway, OrderRepository, Notifier, Clock
     payment_methods.py, event_bus.py, handlers.py
-  infrastructure/    adapters: HTTP payment gateway, notifiers, in-memory repository, clock
+  infrastructure/    adapters: HTTP payment gateway, circuit breaker, notifiers, clock,
+                     in-memory repository, sql/ (PostgreSQL repository and outbox store)
   api/               FastAPI app, schemas, error handlers
   composition.py     the composition root
   main.py            application factory for uvicorn
+  worker.py          outbox worker (python -m shop.worker)
+  observability.py   JSON logging, correlation id, email masking
+migrations/          Alembic migrations
 legacy/checkout.py   the original function, untouched
 tests/
 docs/CODE_REVIEW.md  review of the legacy code
@@ -256,15 +309,54 @@ ARCHITECTURE.md      layers, patterns, decisions, fixed and kept defects
 
 ## Optional tasks
 
-| Task | Status |
-|---|---|
-| D. Architecture checks in CI (`import-linter` + GitHub Actions) | Done |
-| G. `/arch-review` command for Claude Code (`.claude/commands/`) | Done |
-| A. PostgreSQL repository | Not done |
-| B. Transactional outbox with retries | Not done |
-| C. Circuit breaker for the payment adapter | Not done |
-| E. Mutation testing | Not done |
-| F. Structured logs with correlation ids | Not done |
+| Task | Status | Where |
+|---|---|---|
+| A. PostgreSQL repository, Alembic, docker compose, atomic writes | Done | `infrastructure/sql/`, `migrations/`, `docker-compose.yml`, `tests/postgres/` |
+| B. Transactional outbox with retries and backoff | Done | `application/outbox.py`, `infrastructure/sql/outbox.py`, `worker.py` |
+| C. Circuit breaker for the payment adapter | Done | `infrastructure/circuit_breaker.py` |
+| D. Architecture checks in CI (`import-linter` + GitHub Actions) | Done | `pyproject.toml`, `.github/workflows/ci.yml` |
+| E. Mutation testing (`mutmut`) | Done: 199 of 202 mutants killed | `[tool.mutmut]` in `pyproject.toml`, see below |
+| F. Structured logs with correlation ids | Done | `observability.py`, `api/middleware.py` |
+| G. `/arch-review` command for Claude Code | Done | `.claude/commands/` |
+
+Adding the PostgreSQL repository changed no service and no strategy; the only edit outside the new adapter
+and the composition root is a read-only `Order.pending_events` property that lets an adapter persist events
+without consuming them.
+
+## Mutation testing
+
+`mutmut` mutates the domain layer (`src/shop/domain`, 202 mutants) and runs the unit tests against each
+mutant: a mutant that survives is a change to the code that no test notices.
+
+```bash
+uv run mutmut run
+uv run mutmut results     # survivors
+uv run mutmut show <name> # the diff of one mutant
+```
+
+| Run | Killed | Survived | No tests | Score |
+|---|---|---|---|---|
+| First (existing suite) | 184 | 15 | 2 | 91% |
+| After the new tests | 199 | 3 | 0 | 98.5% |
+
+What the survivors of the first run were, and what was done:
+
+- **Card token masking** (4 survivors): `CardToken.__repr__` and `__str__` could return any text and every test
+  still passed, although masking is the whole point of the class. New `test_payment.py` asserts the exact
+  output and that the number survives no formatting.
+- **`Money` error messages** (7 survivors) and **the `Order` timestamp message** (1): messages were replaced by
+  `None` or garbled without a test noticing. New tests pin the messages that make a rejected amount
+  diagnosable.
+- **`Money.is_zero`** had no test at all.
+- Once the scope was widened to all unit tests, three more gaps appeared: **`Order.place` attributes** (9
+  survivors: the placed order's fields were never asserted), **the city reaching the shipping method** (2: the
+  calculator tests did not show that `city` is forwarded) and **`DomainError`'s fallback message** (1). New
+  tests added for each.
+
+The three remaining survivors are **equivalent mutants**: `if x` became `if x or True` in
+`CustomerType.parse` and in the two `.get(...)` guards of `PricingCalculator`. For a falsy `x` the original
+and the mutant behave identically (`dict.get(None)` is `None`, and `CustomerType(None)` raises the
+`ValueError` that is already caught), so no test can tell them apart.
 
 ## Documentation
 

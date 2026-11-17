@@ -8,6 +8,7 @@ delivery methods and payment methods, additive.
 
 - [Layers](#layers)
 - [Checkout flow](#checkout-flow)
+- [Reliable notifications](#reliable-notifications-postgresql-mode)
 - [Key decisions](#key-decisions)
 - [Patterns and the problem each one solves](#patterns-and-the-problem-each-one-solves)
 - [Where patterns were deliberately not applied](#where-patterns-were-deliberately-not-applied)
@@ -50,7 +51,7 @@ The dependency rule: arrows point inwards, and nothing in an inner layer names a
 |---|---|---|
 | `shop.domain` | Value objects, the `Order` aggregate, pricing rules, domain events and errors | the standard library only |
 | `shop.application` | Use cases (`CheckoutService`, `OrderService`), ports, the event bus, payment methods | `shop.domain` |
-| `shop.infrastructure` | Adapters that implement ports: HTTP, storage, clock | `shop.domain`, `httpx` |
+| `shop.infrastructure` | Adapters that implement ports: HTTP, PostgreSQL, clock | `shop.domain`, `shop.application` (port and outbox types, for annotations), `httpx`, `sqlalchemy` |
 | `shop.api` | FastAPI app, pydantic schemas, error translation | `shop.application`, `shop.domain`, `fastapi`, `pydantic` |
 | `shop.composition`, `shop.main` | Wiring | everything |
 
@@ -92,6 +93,47 @@ Pricing is a contract inherited from the legacy code, and each step rounds to a 
 2. promo code (a discount and/or free shipping),
 3. customer-segment discount (VIP, 5%),
 4. shipping, based on the total **after** steps 2 and 3, skipped when the promo waives it.
+
+## Reliable notifications (PostgreSQL mode)
+
+In memory, events are delivered synchronously after the order is stored and a failing handler is logged and
+skipped. That is fine for development but a notification can be lost. With `SHOP_DATABASE_URL` set the
+composition root switches to a **transactional outbox**:
+
+```mermaid
+sequenceDiagram
+    participant API as API process
+    participant DB as PostgreSQL
+    participant W as Worker process
+    participant X as Email / Slack
+
+    API->>DB: BEGIN; INSERT order, lines, outbox rows; COMMIT
+    Note over API,DB: one transaction: no order without its events, no events without an order
+    loop every poll interval
+        W->>DB: claim due rows (FOR UPDATE SKIP LOCKED, lease)
+        W->>X: call each subscriber that has not yet succeeded
+        alt all succeeded
+            W->>DB: status = delivered
+        else some failed
+            W->>DB: attempts + 1, next_attempt_at = now + backoff, remember who succeeded
+        end
+    end
+```
+
+The services are unchanged: they still call `orders.add(order)` and `events.publish(...)`. In this mode the
+repository persists the aggregate's pending events itself, and the bus they publish to has no subscribers, so
+nothing is delivered twice. `OutboxRelay` (application layer, pure Python, tested with an in-memory store) owns
+the retry policy; `SqlOutboxStore` (infrastructure) owns the SQL.
+
+Design choices:
+
+- **A lease instead of a long transaction.** `claim` sets `locked_until` and commits, so no row lock is held while
+  subscribers make network calls, and a crashed worker's rows come back when the lease expires.
+- **Per-subscriber progress** (`delivered_to`), so a retry does not repeat an email that already went out.
+- **Exponential backoff with a cap and a maximum attempt count**, then a terminal `dead` state that stays in the
+  table for inspection instead of retrying forever.
+- **At-least-once delivery.** A crash between a successful send and the update repeats that send. Exactly-once is
+  not achievable against an external HTTP service without its cooperation (an idempotency key).
 
 ## Key decisions
 
@@ -151,6 +193,9 @@ does not exist yet, and a failed state transition records nothing.
 | **Ports and adapters (Dependency Inversion)** | `PaymentGateway`, `OrderRepository`, `Notifier`, `Clock` | Business logic called `requests.post` and `open()` directly and kept `orders` / `last_id` in module globals. It could not be tested without patching the world, and it lost data on restart. |
 | **Observer / domain events** | `EventBus`, `OrderPlaced`, `RefundRequested` | Notification code was inline in the checkout, duplicated per customer type, and a mail failure turned a paid, created order into an HTTP 500 (inviting a retry and a double charge). Subscribers are isolated: a failing one is logged and the others still run. |
 | **Composition root** | `shop/composition.py` | Wiring is in one place; nothing else constructs adapters. |
+| **Decorator / circuit breaker** | `CircuitBreakerGateway` wraps any `PaymentGateway` | A payment provider outage made every checkout wait for a full timeout, tying up a worker thread per request. The breaker fails fast after repeated outages and probes for recovery. It is a decorator because the `PaymentGateway` port lets it be added without the service knowing. |
+| **Transactional outbox + retry with backoff** | `OutboxRelay`, `SqlOutboxStore` | Notifications were fire-and-forget: a mail outage meant a lost email. The events are now stored atomically with the order and delivered until they succeed or are declared dead. |
+| **Unit of Work** (inside the SQL adapter) | `SqlOrderRepository` | One use case, one write: a single database transaction covers the order, its lines and its events. |
 | **Exception hierarchy** | `shop.domain.errors` | Errors were `{"ok": False, "msg": "..."}` strings. |
 
 Configuration that used to be hard-coded is now injected at the composition root: the Slack threshold
@@ -167,9 +212,9 @@ per customer segment, all URLs and timeouts.
 | **Specification pattern** for validation | Four checks with a defined precedence. Plain code in `CheckoutService` and `Cart.of` is shorter and the precedence is visible. |
 | **Strategy for the email template** | The template is a dictionary lookup from customer segment. A class per template would be ceremony. |
 | **`match` replaced by Strategy in `OrderService.change_status`** | Four stable targets mapped one-to-one to aggregate methods, driven by a closed `Enum`. `match` is the right tool here: the set does not grow by configuration and mypy checks the cases. Strategy is used where the set of variants is open (promo codes, delivery, payment), `match` where it is closed. |
-| **Unit of Work / transaction abstraction** | The only store is in memory. Adding a UoW now would be an abstraction over nothing; it belongs with a real database adapter. |
+| **A separate `UnitOfWork` class** | Each use case performs exactly one write, so the transaction is internal to `SqlOrderRepository.add` / `save`. A UoW object would only be justified by a use case that writes through several repositories atomically. |
 | **DI container** (`dependency-injector`, `punq`) | About twenty objects wired in forty lines. FastAPI's `Depends` is used at the HTTP layer only, to hand services to routes. |
-| **CQRS, message broker, outbox** | The workload does not call for them. The event bus is in-process on purpose; the outbox is the next step if delivery guarantees become a requirement (see limitations). |
+| **CQRS, message broker** | The workload does not call for them. The in-process bus is the default; the database outbox gives delivery guarantees without new infrastructure. A broker would be the next step only if consumers outside this service need the events. |
 | **A generic `Result[T, E]`** | See [Errors](#errors-exceptions-not-a-result-type). |
 
 ## Legacy defects: fixed and kept
@@ -211,16 +256,21 @@ more than two decimals are rejected (legacy accepted them and sent fractions of 
 ## Known limitations
 
 - **C2: the card is charged before the order is stored.** If storing the order fails after a successful
-  charge, the customer has paid for nothing. With an in-memory repository the window is tiny, but with
-  a real database it matters. The remedy is outside this scope: an idempotency key sent to the payment
-  provider plus a compensating refund, or an outbox. The `RefundRequested` event is the hook a refund
-  worker would subscribe to.
+  charge, the customer has paid for nothing. The outbox makes the *events* reliable, not the payment. The remedy
+  is an idempotency key sent to the payment provider plus a compensating refund. The `RefundRequested` event is
+  the hook a refund worker would subscribe to.
 - **Refunds are requested, not executed.** Cancelling a paid order publishes `RefundRequested`; the only
   subscriber logs it.
 - **Cash-on-delivery and invoice orders start as `new` and the state machine only allows `new -> paid`
   or `new -> cancelled`.** Shipping such an order requires marking it `paid` first. That is what the
-  specified transition table says; a product decision (for example allowing `new -> shipped` for
-  deferred-payment methods) is needed to change it.
-- **The repository is in memory.** It is not shared between worker processes, so a multi-worker
-  deployment needs a persistent `OrderRepository` adapter. The domain and services need no change.
-- **Notifications are best-effort.** A failed email is logged and not retried.
+  specified transition table says; a product decision is needed to change it.
+- **Status changes are read-modify-write without a version check.** Two concurrent `PATCH` requests on the same
+  order can both pass the state machine against the same loaded state. Optimistic locking (a `version` column
+  checked in `UPDATE ... WHERE version = :v`) would close it.
+- **Outbox delivery is at least once**, so a subscriber may run twice after a crash. The email template service
+  would need an idempotency key to make that invisible to the customer.
+- **The circuit breaker is per process.** With several API workers each opens independently.
+- **The in-memory mode is not shared between processes** and loses data on restart. Use PostgreSQL for anything
+  beyond development.
+- **Dead outbox messages need an operator.** There is no alerting or replay command yet; they are visible with
+  `SELECT * FROM outbox WHERE status = 'dead'`.
