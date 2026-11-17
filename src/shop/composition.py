@@ -18,6 +18,7 @@ from shop.domain.events import OrderPlaced, RefundRequested
 from shop.domain.money import Money
 from shop.domain.pricing.calculator import PricingCalculator
 from shop.domain.pricing.registry import CUSTOMER_DISCOUNTS, PROMOTIONS, SHIPPING_METHODS
+from shop.infrastructure.circuit_breaker import CircuitBreakerGateway
 from shop.infrastructure.clock import SystemClock
 from shop.infrastructure.notifiers import EmailNotifier, SlackBigOrderNotifier
 from shop.infrastructure.payments import HttpPaymentGateway
@@ -34,6 +35,8 @@ class Settings:
     slack_url: str = "https://slack.example.com/hook"
     http_timeout: float = 5.0
     payment_timeout: float = 10.0
+    payment_breaker_threshold: int = 5
+    payment_breaker_reset_seconds: float = 30.0
     cod_limit: Money = COD_LIMIT
     big_order_threshold: Money = BIG_ORDER_THRESHOLD
 
@@ -66,8 +69,10 @@ def build_container(
     repository = repository or InMemoryOrderRepository()
     clock = clock or SystemClock()
 
-    gateway = HttpPaymentGateway(
-        http_client, settings.payments_url, timeout=settings.payment_timeout
+    gateway = CircuitBreakerGateway(
+        HttpPaymentGateway(http_client, settings.payments_url, timeout=settings.payment_timeout),
+        failure_threshold=settings.payment_breaker_threshold,
+        reset_after=settings.payment_breaker_reset_seconds,
     )
     payment_methods: dict[str, PaymentMethod] = {
         "card": CardPayment(gateway),
