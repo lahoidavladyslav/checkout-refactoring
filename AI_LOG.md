@@ -37,6 +37,37 @@ full before any code was written.
    removed; the `float` JSON amount in the payment adapter initially lacked a comment explaining why a
    `float` is acceptable at that one edge.
 
+## The optional tasks (A, B, C, E, F)
+
+A second round of work added the circuit breaker, JSON logging, the PostgreSQL repository, the outbox and
+mutation testing. Mistakes made and caught on the way:
+
+1. **A silent no-op edit.** A scripted string replacement meant to wire the breaker settings into
+   `Settings.from_env` did not match (the formatter had reflowed the line) and failed silently, so the
+   environment variables were not wired. Found while rewriting `composition.py` for the outbox, not by a test.
+   The class of problem is "a patch script that does not check it applied"; later edits assert on the result.
+2. **The same hand-calculation error as before.** New end-to-end tests placed 10000+ UAH orders with cash on
+   delivery, which the 5000 limit refuses. Fixed by using card payment; the lesson in item 1 of the first list
+   was not applied until the tests failed.
+3. **Backoff overflow.** `RetryPolicy.delay_after` raised `OverflowError` for large attempt numbers
+   (`2.0 ** 5000`). A parametrised test with extreme inputs found it; the fix caps before converting.
+4. **Time zone leak.** The repository returned `timestamptz` values in the database session's zone
+   (`Europe/Kiev`), found by a round-trip test against a real PostgreSQL. Normalised to UTC on read.
+5. **Test fixture bug.** The log-capturing fixture filled its result list in the teardown, after the test had
+   already read it; two tests failed for that reason, not because of the code.
+6. **Tooling.** `ruff` was pointed at the generated `mutants/` directory and linted generated code; `mutmut`
+   needed three configuration attempts (missing `legacy/`, missing sibling packages, then Postgres tests
+   collected in the stats run). The first mutation run was therefore on a narrower test selection than the
+   last, which changed which mutants survived; the README reports both runs.
+
+What mutation testing added that the author's own test design had not: it found that nothing verified the
+masking of `CardToken`, the single most security-relevant `__repr__` in the project, and that the placed
+`Order`'s fields were never asserted in the domain tests.
+
+Decisions kept from over-engineering here: no `UnitOfWork` class (the transaction is inside the adapter), no
+message broker, no circuit-breaker library, a lease-based claim instead of long transactions that hold locks
+across network calls, and an ordinary `logging.Formatter` instead of a structured-logging dependency.
+
 ## Where Claude over-engineered, or was kept from it
 
 The design work deliberately declined the patterns a model reaches for by default. Each is recorded with
