@@ -1,6 +1,7 @@
 # Code review: `legacy/checkout.py`
 
-A review of the legacy checkout module, written before any refactoring started.
+A review of the legacy checkout module. Sections 1 to 5 were written before any refactoring started; the
+second review in section 6 is a later pass over the same code.
 Every finding has an ID so that tests, commits and `ARCHITECTURE.md` can refer to it.
 
 Severity: **High** (money, security or data loss), **Medium** (wrong or surprising
@@ -67,3 +68,33 @@ The "Resolution" column records the outcome of the refactoring; see
 4. **The legacy module has to remain the oracle.** The characterization suite runs the same cases
    against the legacy function and against the new service and compares the observable effects
    (result, and every outbound HTTP call), not internal structure.
+
+## 6. Second review (AI-assisted)
+
+Sections 1 to 5 were also produced with Claude Code (see [`AI_LOG.md`](../AI_LOG.md)), so this is not an
+independent comparison of a human and a model. It is a second, deliberately adversarial pass done after the
+implementation existed: re-read the legacy source line by line, assume section 1 missed things, and check the
+new code for each one.
+
+### Found in the second pass, missed in the first
+
+| ID | Sev. | Finding | Resolution |
+|----|------|---------|------------|
+| X1 | Medium | **Aliasing:** `order["items"]` is the caller's own list. A caller that edits its request after the call changes the stored order and the log source. | Fixed: `Cart` and `Order` hold an immutable tuple of frozen `OrderLine`s. |
+| X2 | Medium | **`TypeError`, not a validation error, for a non-string email** (`"@" not in 42`). Likewise a string `qty` fails with a `TypeError` in the comparison. | Fixed at the boundary: pydantic rejects the types with a 422. |
+| X3 | Low | **Order lookup is a linear scan** over the in-memory list on every `change_status`. | Fixed: dictionary keyed by id. |
+| X4 | Low | **Retried requests create duplicates.** There is no idempotency key, so a client retry after a timeout creates and charges a second order. | Not fixed: documented as a known limitation (see C2 in `ARCHITECTURE.md`). |
+| X5 | Low | **The notification amount is the float total**, so an email can show `134.991`. | Fixed with C1: totals are whole kopiyky. |
+
+### Found in the first pass, not by the second
+
+C2 (charge before persist) and C8 to C9 (threshold and `FREESHIP` semantics) were identified only in the first
+pass; the second pass re-confirmed them rather than finding them.
+
+### Considered and not adopted
+
+- **Rejecting unknown promo codes (C7)** so that a customer learns a code was not applied. Ignoring is the
+  current behaviour that clients may depend on, and the decision belongs to the product owner. It is a one-line
+  change in `PricingCalculator` if wanted.
+- **Allowing `new -> shipped` for cash-on-delivery orders.** The task specifies the transition table; the
+  limitation is recorded in `ARCHITECTURE.md`.

@@ -259,6 +259,7 @@ ARCHITECTURE.md      layers, patterns, decisions, fixed and kept defects
 | Task | Status |
 |---|---|
 | D. Architecture checks in CI (`import-linter` + GitHub Actions) | Done |
+| G. `/arch-review` command for Claude Code (`.claude/commands/`) | Done |
 | A. PostgreSQL repository | Not done |
 | B. Transactional outbox with retries | Not done |
 | C. Circuit breaker for the payment adapter | Not done |
@@ -271,3 +272,5 @@ ARCHITECTURE.md      layers, patterns, decisions, fixed and kept defects
   were deliberately not used, defects fixed and kept, known limitations.
 - [`docs/CODE_REVIEW.md`](docs/CODE_REVIEW.md): the review of the legacy code that drove the work.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): architecture rules and workflow.
+- [`CLAUDE.md`](CLAUDE.md): the rules AI-assisted work follows here.
+- [`AI_LOG.md`](AI_LOG.md): how AI was used, where it went wrong, what was rejected.
