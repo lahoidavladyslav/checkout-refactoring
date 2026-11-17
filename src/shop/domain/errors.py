@@ -50,12 +50,6 @@ class InvalidQuantityError(CheckoutError):
     code = "bad_qty"
 
 
-class InvalidPriceError(CheckoutError):
-    """An item price must not be negative."""
-
-    code = "bad_price"
-
-
 class UnsupportedDeliveryError(CheckoutError):
     """The delivery method is not supported."""
 
@@ -78,6 +72,12 @@ class InvoiceNotAllowedError(CheckoutError):
     """Payment by invoice is available to business customers only."""
 
     code = "invoice_b2b_only"
+
+
+class CardRequiredError(CheckoutError):
+    """Paying by card requires card details."""
+
+    code = "card_required"
 
 
 class PaymentGatewayUnavailableError(CheckoutError):
