@@ -95,6 +95,8 @@ class TestRejections:
             ({"items": [{"price": "5000", "qty": 1}]}, 422, "cod_limit"),
             ({"payment": "invoice"}, 422, "invoice_b2b_only"),
             ({"payment": "card"}, 422, "card_required"),
+            ({"payment": "crypto"}, 422, "unsupported_payment"),
+            ({"payment": None}, 422, "unsupported_payment"),
         ],
     )
     def test_business_rules(

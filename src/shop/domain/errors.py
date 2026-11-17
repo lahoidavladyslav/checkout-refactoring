@@ -74,6 +74,12 @@ class InvoiceNotAllowedError(CheckoutError):
     code = "invoice_b2b_only"
 
 
+class UnsupportedPaymentMethodError(CheckoutError):
+    """The payment method is missing or not supported."""
+
+    code = "unsupported_payment"
+
+
 class CardRequiredError(CheckoutError):
     """Paying by card requires card details."""
 

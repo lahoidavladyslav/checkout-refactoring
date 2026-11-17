@@ -6,11 +6,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from shop.application.event_bus import EventBus
-from shop.application.payment_methods import Deferred, PaymentContext, PaymentMethod
+from shop.application.payment_methods import PaymentContext, PaymentMethod
 from shop.application.ports import Clock, OrderRepository
 from shop.domain.cart import Cart, OrderLine
 from shop.domain.customer import CustomerType, EmailAddress
-from shop.domain.errors import NoItemsError
+from shop.domain.errors import NoItemsError, UnsupportedPaymentMethodError
 from shop.domain.order import Order
 from shop.domain.payment import CardToken
 from shop.domain.pricing.calculator import PricingCalculator
@@ -63,7 +63,9 @@ class CheckoutService:
             city=command.city,
         )
 
-        method = self._payment_methods.get(command.payment or "", Deferred())
+        method = self._payment_methods.get(command.payment or "")
+        if method is None:
+            raise UnsupportedPaymentMethodError
         paid = method.settle(
             PaymentContext(total=quote.total, customer_type=customer_type, card=command.card)
         )

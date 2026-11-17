@@ -62,15 +62,3 @@ class Invoice:
         if context.customer_type is not CustomerType.B2B:
             raise InvoiceNotAllowedError
         return False
-
-
-@dataclass(frozen=True, slots=True)
-class Deferred:
-    """No checks, nothing collected.
-
-    This is what the legacy checkout effectively did for an unrecognised payment method. It is
-    kept only until the dedicated fix commit replaces it with a rejection.
-    """
-
-    def settle(self, context: PaymentContext) -> bool:
-        return False

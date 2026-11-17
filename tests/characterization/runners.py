@@ -107,6 +107,9 @@ LEGACY_MESSAGE_BY_CODE = {
     "payment_failed": "payment failed",
     "cod_limit": "cod limit",
     "invoice_b2b_only": "invoice only b2b",
+    # No legacy counterpart: the legacy checkout accepted any payment method. Used only by
+    # the intentional divergences in cases.py.
+    "unsupported_payment": "unsupported payment",
 }
 
 

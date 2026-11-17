@@ -247,18 +247,6 @@ PAYMENTS = [
         request(100, payment="invoice"),
         failure("invoice only b2b"),
     ),
-    Case(
-        "unknown-payment-method-creates-an-unpaid-order",
-        request(100, payment="crypto"),
-        placed("145.00"),
-        tags=frozenset({"defect"}),
-    ),
-    Case(
-        "missing-payment-method-creates-an-unpaid-order",
-        {**request(100), "payment": None},
-        placed("145.00"),
-        tags=frozenset({"defect"}),
-    ),
 ]
 
 NOTIFICATIONS = [
@@ -287,6 +275,38 @@ NOTIFICATIONS = [
         "slack-uses-the-vip-total",
         request(10500, user_type="vip", payment="card", card="tok_visa"),
         placed("10020.00", template="vip_order", status="paid", charged=True, big=True),
+    ),
+]
+
+
+@dataclass(frozen=True)
+class Divergence:
+    """A case where the new implementation intentionally behaves differently from the legacy one.
+
+    Each entry is a fix that has its own commit and its own entry in docs/CODE_REVIEW.md.
+    """
+
+    id: str
+    defect: str
+    payload: dict[str, Any]
+    legacy: Observed
+    new: Observed
+
+
+DIVERGENCES = [
+    Divergence(
+        "unknown-payment-method",
+        defect="C4",
+        payload=request(100, payment="crypto"),
+        legacy=placed("145.00"),
+        new=failure("unsupported payment"),
+    ),
+    Divergence(
+        "missing-payment-method",
+        defect="C4",
+        payload={**request(100), "payment": None},
+        legacy=placed("145.00"),
+        new=failure("unsupported payment"),
     ),
 ]
 

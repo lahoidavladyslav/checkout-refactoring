@@ -18,6 +18,7 @@ from shop.domain.errors import (
     PaymentDeclinedError,
     PaymentGatewayUnavailableError,
     UnsupportedDeliveryError,
+    UnsupportedPaymentMethodError,
 )
 from shop.domain.events import OrderPlaced
 from shop.domain.money import Money
@@ -95,6 +96,9 @@ class TestRejections:
             ({"lines": (line("5000"),)}, CashOnDeliveryLimitError),
             ({"payment": "invoice"}, InvoiceNotAllowedError),
             ({"payment": "card", "card": None}, CardRequiredError),
+            ({"payment": "crypto"}, UnsupportedPaymentMethodError),
+            ({"payment": ""}, UnsupportedPaymentMethodError),
+            ({"payment": None}, UnsupportedPaymentMethodError),
         ],
     )
     def test_rejected(

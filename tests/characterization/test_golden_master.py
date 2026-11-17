@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.characterization.cases import ALL_CASES, Case, request
+from tests.characterization.cases import ALL_CASES, DIVERGENCES, Case, Divergence, request
 from tests.characterization.model import Runner
 
 pytestmark = pytest.mark.characterization
@@ -22,8 +22,15 @@ def test_case(case: Case, runner: Runner) -> None:
     assert observed == case.expected
 
 
+@pytest.mark.parametrize("case", DIVERGENCES, ids=lambda case: case.id)
+def test_intentional_divergence(case: Divergence, runner: Runner) -> None:
+    expected = case.legacy if runner.name == "legacy" else case.new
+
+    assert runner.checkout(case.payload) == expected
+
+
 def test_case_ids_are_unique() -> None:
-    ids = [case.id for case in ALL_CASES]
+    ids = [case.id for case in [*ALL_CASES, *DIVERGENCES]]
 
     assert len(ids) == len(set(ids))
 
